@@ -693,13 +693,13 @@ async function runAI() {
     : `Tu es un assistant pour le mod Minecraft "Aylox Furnitures" (Forge 1.20.1).\n\nÉtat actuel :\n${summary}\n\nGénère un résumé d'avancement structuré : ce qui est fait, ce qui reste prioritaire, 2-3 conseils concrets. Sois concis et encourageant.`;
 
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch("https://aylox-ai-proxy.aydindnt7.workers.dev/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
+      body: JSON.stringify({ prompt })
     });
     const json = await res.json();
-    out.textContent = json.content?.map(b => b.text||"").join("") || "Pas de réponse.";
+    out.textContent = json.text || "Pas de réponse.";
   } catch {
     out.textContent = "Erreur de connexion à l'IA. Réessaie dans un moment.";
   }
@@ -712,16 +712,15 @@ async function aiGenerateDesc() {
   descEl.value = "L'IA génère…";
   descEl.disabled = true;
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch("https://aylox-ai-proxy.aydindnt7.workers.dev/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6", max_tokens: 1000,
-        messages: [{ role: "user", content: `Pour le mod Minecraft "Aylox Furnitures" (Forge 1.20.1), génère une description technique courte (3-4 phrases max) pour cette tâche : "${name}". Sois précis, pratique, sans intro ni conclusion.` }]
+        prompt: `Pour le mod Minecraft "Aylox Furnitures" (Forge 1.20.1), génère une description technique courte (3-4 phrases max) pour cette tâche : "${name}". Sois précis, pratique, sans intro ni conclusion.`
       })
     });
     const json = await res.json();
-    descEl.value = json.content?.map(b => b.text||"").join("") || "";
+    descEl.value = json.text || "";
   } catch { descEl.value = ""; }
   descEl.disabled = false;
 }
@@ -733,16 +732,15 @@ async function aiDescTask(id) {
   aiOut.className = "ai-inline-out open";
   aiOut.textContent = "L'IA améliore la description…";
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch("https://aylox-ai-proxy.aydindnt7.workers.dev/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6", max_tokens: 1000,
-        messages: [{ role: "user", content: `Pour le mod Minecraft "Aylox Furnitures" (Forge 1.20.1), améliore cette description de tâche.\n\nTâche : "${task.name}"\nDescription actuelle : "${task.description||"aucune"}"\n\nGénère une description améliorée, précise et utile pour un développeur Forge. 3-5 phrases max. Pas d'intro, juste la description.` }]
+        prompt: `Pour le mod Minecraft "Aylox Furnitures" (Forge 1.20.1), améliore cette description de tâche.\n\nTâche : "${task.name}"\nDescription actuelle : "${task.description||"aucune"}"\n\nGénère une description améliorée, précise et utile pour un développeur Forge. 3-5 phrases max. Pas d'intro, juste la description.`
       })
     });
     const json = await res.json();
-    const text = json.content?.map(b => b.text||"").join("") || "";
+    const text = json.text || "";
     aiOut.dataset.text = text;
     aiOut.innerHTML = `<strong style="color:var(--purple-text);font-size:11px">Suggestion IA :</strong><br><br>${esc(text)}<br><br>
       <button class="task-desc-btn" onclick="applyAIDesc('${id}')">Appliquer cette description</button>`;
