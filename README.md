@@ -402,6 +402,7 @@ function renderTasks() {
   $('categories').innerHTML = groups.map(c => {
     const done = c.tasks.filter(t => t.done).length;
     const isCollapsed = collapsedCats.has(c.id);
+    const body = isCollapsed ? '' : (c.tasks.length ? c.tasks.map(renderTask).join('') : '<div class="empty">Aucune tâche ici.</div>') + '<div class="add-inline"><input placeholder="＋ Ajouter rapidement…" data-quick="' + c.id + '"></div>';
     return `<div class="card category">
       <div class="category-head">
         <div class="category-name"><span class="category-icon"><svg viewBox="0 0 24 24">${ICONS[c.icon]}</svg></span>${esc(c.label)}</div>
@@ -410,7 +411,7 @@ function renderTasks() {
           <button class="mini-action" data-toggle-cat="${c.id}"><svg viewBox="0 0 24 24"><path d="${isCollapsed ? 'm6 9 6 6 6-6' : 'm18 15-6-6-6 6'}"/></svg></button>
         </div>
       </div>
-      ${isCollapsed ? '' : (c.tasks.length ? c.tasks.map(renderTask).join('') : '<div class="empty">Aucune tâche ici.</div>') + `<div class="add-inline"><input placeholder="＋ Ajouter rapidement…" data-quick="${c.id}"></div>`}
+      ${body}
     </div>`;
 
 function renderTask(t) {
