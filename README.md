@@ -411,8 +411,10 @@ function renderTasks() {
           <button class="mini-action" data-toggle-cat="${c.id}"><svg viewBox="0 0 24 24"><path d="${isCollapsed ? 'm6 9 6 6 6-6' : 'm18 15-6-6-6 6'}"/></svg></button>
         </div>
       </div>
-      ${body}
+    ${body}
     </div>`;
+  }).join('');
+}
 
 function renderTask(t) {
   const open = expanded.has(String(t.id));
