@@ -250,6 +250,7 @@ const ICONS = {
 // ════ ÉTAT ════
 let tasks = [], notes = {}, changelogs = [], bugs = [], roadmap = {};
 let expanded = new Set(), editingTask = null, editingBug = null, charts = {};
+let collapsedCats = new Set();
 let activity = [], toastTimer;
 
 // ════ UTILS ════
@@ -400,16 +401,17 @@ function renderTasks() {
   const groups = filteredTasks();
   $('categories').innerHTML = groups.map(c => {
     const done = c.tasks.filter(t => t.done).length;
+    const isCollapsed = collapsedCats.has(c.id);
     return `<div class="card category">
       <div class="category-head">
         <div class="category-name"><span class="category-icon"><svg viewBox="0 0 24 24">${ICONS[c.icon]}</svg></span>${esc(c.label)}</div>
-        <span class="count ${c.tasks.length && done === c.tasks.length ? 'done' : ''}">${done}/${c.tasks.length}</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="count ${c.tasks.length && done === c.tasks.length ? 'done' : ''}">${done}/${c.tasks.length}</span>
+          <button class="mini-action" data-toggle-cat="${c.id}"><svg viewBox="0 0 24 24"><path d="${isCollapsed ? 'm6 9 6 6 6-6' : 'm18 15-6-6-6 6'}"/></svg></button>
+        </div>
       </div>
-      ${c.tasks.length ? c.tasks.map(renderTask).join('') : '<div class="empty">Aucune tâche ici.</div>'}
-      <div class="add-inline"><input placeholder="＋ Ajouter rapidement…" data-quick="${c.id}"></div>
+      ${isCollapsed ? '' : (c.tasks.length ? c.tasks.map(renderTask).join('') : '<div class="empty">Aucune tâche ici.</div>') + `<div class="add-inline"><input placeholder="＋ Ajouter rapidement…" data-quick="${c.id}"></div>`}
     </div>`;
-  }).join('');
-}
 
 function renderTask(t) {
   const open = expanded.has(String(t.id));
@@ -807,6 +809,11 @@ document.addEventListener('click', e => {
   if (b.dataset.deleteBug)   deleteBug(b.dataset.deleteBug);
   if (b.dataset.deleteRoadmap) deleteRoadmap(b.dataset.deleteRoadmap);
   if (b.dataset.aiDesc)      aiImproveTask(b.dataset.aiDesc);
+  if (b.dataset.toggleCat) {
+    const id = b.dataset.toggleCat;
+    collapsedCats.has(id) ? collapsedCats.delete(id) : collapsedCats.add(id);
+    renderTasks();
+  }
   // Suggestions IA rapides
   if (b.dataset.prompt)      sendAIMessage(b.dataset.prompt);
 });
