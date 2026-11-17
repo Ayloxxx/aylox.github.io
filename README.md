@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Aylox Furnitures — Studio</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -2453,6 +2455,41 @@ applyTheme(
 );
 
 init();
+
+
+function appendAIMessage(role, text) {
+  const welcome = $('aiWelcome');
+
+  if (welcome) welcome.remove();
+
+  const div = document.createElement('div');
+  div.className = 'ai-message ' + role;
+
+  let content;
+
+  if (role === 'user' || role === 'error') {
+    content = esc(text).replace(/\n/g, '<br>');
+  } else {
+    const markdown = marked.parse(String(text ?? ''), {
+      breaks: true,
+      gfm: true
+    });
+
+    content = DOMPurify.sanitize(markdown);
+  }
+
+  div.innerHTML = `
+    <div class="ai-message-role">
+      ${role === 'user' ? 'Toi' : role === 'error' ? 'Erreur' : 'Aylox IA'}
+    </div>
+    <div class="ai-message-body">${content}</div>
+  `;
+
+  $('aiChat').appendChild(div);
+  $('aiChat').scrollTop = $('aiChat').scrollHeight;
+
+  return div;
+}
 
 </script>
 </body>
