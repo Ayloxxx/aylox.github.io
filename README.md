@@ -859,6 +859,314 @@ $('aiContextRefresh').onclick = updateAIContext;
 // Thème & init
 applyTheme(localStorage.getItem('aylox_theme') === 'dark' ? 'dark' : 'light');
 init();
+
+// ════ IA — appel proxy ════
+async function callAI(prompt) {
+  const r = await fetch(AI_PROXY, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
+  if (!r.ok) throw new Error('Proxy IA indisponible (' + r.status + ')');
+  const j = await r.json();
+  if (j.error) throw new Error(j.error);
+  return j.text || 'Aucune réponse reçue.';
+}
+
+// ════ IA — amélioration de description de tâche ════
+async function aiImproveTask(id) {
+  const t = tasks.find(x => String(x.id) === String(id));
+  if (!t) return;
+  try {
+    const text = await callAI(`Améliore la description technique de cette tâche pour le mod Minecraft Aylox Furnitures Forge 1.20.1. Tâche : ${t.name}. Description actuelle : ${t.description || 'aucune'}. Donne 3 à 5 phrases concrètes, sans introduction.`);
+    if (confirm('Suggestion IA :\n\n' + text + '\n\nRemplacer la description actuelle ?')) {
+      await sb(`tasks?id=eq.${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ description: text }), prefer: 'return=minimal' });
+      t.description = text; renderTasks(); toast('Description mise à jour');
+    }
+  } catch(e) { toast('Erreur IA : ' + e.message); }
+}
+
+// ════ IA — DRAWER ════
+let aiMessages = [];
+
+// Contexte détaillé : liste toutes les tâches avec leurs IDs pour que l'IA puisse les cibler
+function buildAIContext() {
+  const done = tasks.filter(t => t.done).length;
+  const taskList = tasks.map(t =>
+    `[${t.id}] "${t.name}" | cat:${t.cat_id} | prio:${t.prio} | ${t.done ? 'terminée' : 'à faire'}`
+  ).join('\n');
+  const bugList = bugs.map(b => `[${b.id}] "${b.title}" | statut:${b.status}`).join('\n');
+  return { summary: `${progress()}% (${done}/${tasks.length} tâches). Bugs ouverts : ${bugs.filter(b => b.status === 'ouvert').length}.`, taskList, bugList };
+}
+
+function updateAIContext() {
+  $('aiContextLabel').textContent = `${progress()}% · ${tasks.filter(t => t.done).length}/${tasks.length} tâches`;
+}
+
+function openAIDrawer() {
+  $('aiDrawer').classList.add('open');
+  $('aiScrim').classList.add('open');
+  $('aiInput').focus();
+}
+function closeAIDrawer() {
+  $('aiDrawer').classList.remove('open');
+  $('aiScrim').classList.remove('open');
+}
+
+function appendAIMessage(role, text) {
+  const welcome = $('aiWelcome');
+  if (welcome) welcome.remove();
+  const div = document.createElement('div');
+  div.className = 'ai-message ' + role;
+  div.innerHTML = `<div class="ai-message-role">${role === 'user' ? 'Toi' : 'Aylox IA'}</div><div class="ai-message-body">${esc(text)}</div>`;
+  $('aiChat').appendChild(div);
+  $('aiChat').scrollTop = $('aiChat').scrollHeight;
+  return div;
+}
+
+function showAITyping() {
+  const div = document.createElement('div');
+  div.id = 'aiTypingIndicator';
+  div.className = 'ai-typing';
+  div.innerHTML = '<i></i><i></i><i></i>';
+  $('aiChat').appendChild(div);
+  $('aiChat').scrollTop = $('aiChat').scrollHeight;
+}
+function hideAITyping() {
+  const el = $('aiTypingIndicator');
+  if (el) el.remove();
+}
+
+// ════ IA — exécution des actions ════
+// L'IA répond avec du texte libre + optionnellement %%ACTION%%{...}%%
+// On parse le bloc action, on l'exécute, puis on informe l'IA du résultat
+
+async function executeAIAction(action) {
+  const { type, payload } = action;
+
+  // --- TÂCHES ---
+  if (type === 'add_task') {
+    const id = 't' + Date.now();
+    const cat = CATEGORIES.find(c => c.id === payload.cat_id) ? payload.cat_id : 'base';
+    const row = {
+      id, name: payload.name, cat_id: cat,
+      prio: payload.prio || 'moyenne',
+      note: payload.note || '', description: payload.description || '',
+      done: false, position: tasks.filter(t => t.cat_id === cat).length
+    };
+    await sb('tasks', { method: 'POST', body: JSON.stringify(row), prefer: 'return=minimal' });
+    tasks.push(row);
+    record('IA — Tâche ajoutée : <strong>' + esc(row.name) + '</strong>');
+    return `Tâche "${row.name}" ajoutée dans "${CATEGORIES.find(c=>c.id===cat)?.label}".`;
+  }
+
+  if (type === 'edit_task') {
+    const t = tasks.find(x => String(x.id) === String(payload.id));
+    if (!t) throw new Error('Tâche introuvable : ' + payload.id);
+    const data = {};
+    if (payload.name)        data.name        = payload.name;
+    if (payload.cat_id)      data.cat_id      = payload.cat_id;
+    if (payload.prio)        data.prio        = payload.prio;
+    if (payload.note  !== undefined) data.note = payload.note;
+    if (payload.description !== undefined) data.description = payload.description;
+    if (payload.done  !== undefined) data.done = payload.done;
+    await sb(`tasks?id=eq.${encodeURIComponent(t.id)}`, { method: 'PATCH', body: JSON.stringify(data), prefer: 'return=minimal' });
+    Object.assign(t, data);
+    record('IA — Tâche modifiée : <strong>' + esc(t.name) + '</strong>');
+    return `Tâche "${t.name}" mise à jour.`;
+  }
+
+  if (type === 'delete_task') {
+    const t = tasks.find(x => String(x.id) === String(payload.id));
+    if (!t) throw new Error('Tâche introuvable : ' + payload.id);
+    await sb(`tasks?id=eq.${encodeURIComponent(t.id)}`, { method: 'DELETE', prefer: 'return=minimal' });
+    tasks = tasks.filter(x => String(x.id) !== String(t.id));
+    record('IA — Tâche supprimée : <strong>' + esc(t.name) + '</strong>');
+    return `Tâche "${t.name}" supprimée.`;
+  }
+
+  if (type === 'toggle_task') {
+    const t = tasks.find(x => String(x.id) === String(payload.id));
+    if (!t) throw new Error('Tâche introuvable : ' + payload.id);
+    t.done = !t.done;
+    await sb(`tasks?id=eq.${encodeURIComponent(t.id)}`, { method: 'PATCH', body: JSON.stringify({ done: t.done }), prefer: 'return=minimal' });
+    record('IA — Tâche ' + (t.done ? 'terminée' : 'rouverte') + ' : <strong>' + esc(t.name) + '</strong>');
+    return `Tâche "${t.name}" marquée comme ${t.done ? 'terminée ✓' : 'à faire'}.`;
+  }
+
+  // --- BUGS ---
+  if (type === 'add_bug') {
+    const row = {
+      id: 'bug' + Date.now(), title: payload.title,
+      desc: payload.desc || '', status: payload.status || 'ouvert',
+      version: payload.version || ''
+    };
+    bugs.unshift(row);
+    await saveMeta('bugs', bugs);
+    record('IA — Bug ajouté : <strong>' + esc(row.title) + '</strong>');
+    return `Bug "${row.title}" signalé (statut : ${row.status}).`;
+  }
+
+  if (type === 'edit_bug') {
+    const b = bugs.find(x => String(x.id) === String(payload.id));
+    if (!b) throw new Error('Bug introuvable : ' + payload.id);
+    if (payload.title)   b.title   = payload.title;
+    if (payload.desc !== undefined) b.desc = payload.desc;
+    if (payload.status)  b.status  = payload.status;
+    if (payload.version !== undefined) b.version = payload.version;
+    await saveMeta('bugs', bugs);
+    record('IA — Bug modifié : <strong>' + esc(b.title) + '</strong>');
+    return `Bug "${b.title}" mis à jour (statut : ${b.status}).`;
+  }
+
+  if (type === 'delete_bug') {
+    const b = bugs.find(x => String(x.id) === String(payload.id));
+    if (!b) throw new Error('Bug introuvable : ' + payload.id);
+    bugs = bugs.filter(x => String(x.id) !== String(b.id));
+    await saveMeta('bugs', bugs);
+    record('IA — Bug supprimé : <strong>' + esc(b.title) + '</strong>');
+    return `Bug "${b.title}" supprimé.`;
+  }
+
+  // --- CHANGELOG ---
+  if (type === 'add_changelog') {
+    const entry = {
+      id: 'cl' + Date.now(), version: payload.version,
+      date: payload.date || new Date().toISOString().slice(0, 10),
+      changes: payload.changes || []
+    };
+    changelogs.unshift(entry);
+    await saveMeta('changelogs', changelogs);
+    record('IA — Version ajoutée : <strong>v' + esc(entry.version) + '</strong>');
+    return `Version ${entry.version} ajoutée au changelog (${entry.changes.length} changement(s)).`;
+  }
+
+  // --- ROADMAP ---
+  if (type === 'add_roadmap') {
+    const v = payload.version;
+    if (!ROADMAP_VERSIONS.includes(v)) throw new Error('Version roadmap invalide : ' + v);
+    roadmap[v] = roadmap[v] || [];
+    roadmap[v].push(payload.item);
+    await saveMeta('roadmap', roadmap);
+    return `"${payload.item}" ajouté à la roadmap ${v}.`;
+  }
+
+  throw new Error('Action inconnue : ' + type);
+}
+
+// ════ IA — envoi de message principal ════
+async function sendAIMessage(userText) {
+  const text = (userText || $('aiInput').value).trim();
+  if (!text) return;
+  $('aiInput').value = '';
+  $('aiSend').disabled = true;
+
+  appendAIMessage('user', text);
+  aiMessages.push({ role: 'user', content: text });
+  showAITyping();
+
+  const ctx = buildAIContext();
+
+  // Prompt système : contexte + liste des actions disponibles
+  const systemPrompt = `Tu es l'assistant intégré de l'outil de développement du mod Minecraft Aylox Furnitures (Forge 1.20.1).
+
+ÉTAT ACTUEL DU PROJET :
+${ctx.summary}
+
+LISTE DES TÂCHES (id | nom | catégorie | priorité | statut) :
+${ctx.taskList || '(aucune tâche)'}
+
+LISTE DES BUGS (id | titre | statut) :
+${ctx.bugList || '(aucun bug)'}
+
+CATÉGORIES DISPONIBLES : base, meubles, food, textures, publi
+PRIORITÉS DISPONIBLES : haute, moyenne, basse
+STATUTS BUG : ouvert, en cours, corrigé
+VERSIONS ROADMAP : "V1 (actuelle)", "V2", "V3", "Idées futures"
+
+TU PEUX EFFECTUER DES ACTIONS RÉELLES sur le projet. Pour ce faire, inclus à la fin de ta réponse un bloc action dans ce format exact :
+%%ACTION%%{"type":"add_task","payload":{"name":"...","cat_id":"...","prio":"..."}}%%
+
+ACTIONS DISPONIBLES :
+- add_task       : payload { name*, cat_id*, prio, note, description }
+- edit_task      : payload { id*, name, cat_id, prio, note, description, done }
+- delete_task    : payload { id* }
+- toggle_task    : payload { id* }  (bascule terminée/à faire)
+- add_bug        : payload { title*, desc, status, version }
+- edit_bug       : payload { id*, title, desc, status, version }
+- delete_bug     : payload { id* }
+- add_changelog  : payload { version*, date, changes[] }
+- add_roadmap    : payload { version*, item* }
+
+RÈGLES :
+- N'exécute UNE SEULE action par réponse.
+- Si l'utilisateur demande plusieurs actions, fais-en une et demande confirmation pour la suite.
+- Réponds TOUJOURS en français, de façon concise.
+- Si tu ne fais pas d'action, ne mets pas de bloc %%ACTION%%.
+- Le bloc %%ACTION%% doit être du JSON valide.`;
+
+  const fullPrompt = `[SYSTÈME]\n${systemPrompt}\n\n[HISTORIQUE]\n${aiMessages.slice(-8).map(m => `${m.role === 'user' ? 'Utilisateur' : 'Assistant'}: ${m.content}`).join('\n')}\n\nAssistant:`;
+
+  try {
+    const reply = await callAI(fullPrompt);
+    hideAITyping();
+
+    // Sépare le texte du bloc action
+    const actionMatch = reply.match(/%%ACTION%%(\{[\s\S]*?\})%%/);
+    const displayText = reply.replace(/%%ACTION%%[\s\S]*?%%/g, '').trim();
+
+    // Affiche le texte
+    if (displayText) {
+      appendAIMessage('assistant', displayText);
+      aiMessages.push({ role: 'assistant', content: displayText });
+    }
+
+    // Exécute l'action si présente
+    if (actionMatch) {
+      let action;
+      try {
+        action = JSON.parse(actionMatch[1]);
+      } catch(e) {
+        appendAIMessage('error', 'L\'IA a renvoyé une action invalide (JSON malformé).');
+        return;
+      }
+
+      // Indicateur d'exécution
+      showAITyping();
+      try {
+        const result = await executeAIAction(action);
+        hideAITyping();
+        renderAll();
+        updateAIContext();
+        sync('ok', 'Synchronisé');
+
+        // Message de confirmation de l'action
+        const confirmMsg = '✓ ' + result;
+        appendAIMessage('assistant', confirmMsg);
+        aiMessages.push({ role: 'assistant', content: confirmMsg });
+        toast(result);
+      } catch(e) {
+        hideAITyping();
+        appendAIMessage('error', 'Échec de l\'action : ' + e.message);
+        sync('error', 'Erreur action IA');
+      }
+    }
+
+  } catch(e) {
+    hideAITyping();
+    const errDiv = appendAIMessage('assistant', 'Impossible de contacter l\'assistant : ' + e.message);
+    errDiv.className = 'ai-message error';
+  } finally {
+    $('aiSend').disabled = false;
+    $('aiInput').focus();
+  }
+}
+
+function clearAIChat() {
+  aiMessages = [];
+  $('aiChat').innerHTML = `<div class="ai-welcome" id="aiWelcome">
+    <div class="ai-welcome-mark">✦</div>
+    <strong>Bonjour ! Je suis ton assistant Aylox.</strong>
+    <p>Je connais l'état de tes tâches et peux t'aider à avancer sur le mod. Pose-moi une question ou utilise les suggestions ci-dessus.</p>
+  </div>`;
+}
+  
 </script>
 </body>
 </html>
